@@ -254,9 +254,80 @@ tr.day-row:hover{background:var(--paper-deep);}
   .hero,.main{padding-left:18px;padding-right:18px;}
   .footer-note{margin-left:18px;margin-right:18px;}
 }
+
+
+/* ---------- Supabase cloud sync ---------- */
+.cloud-hidden{display:none !important;}
+.cloud-gate{
+  position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;
+  padding:18px;background:rgba(33,31,25,.72);backdrop-filter:blur(5px);
+}
+.cloud-card{
+  width:min(460px,100%);background:var(--paper-raised);border:1px solid var(--rule-strong);
+  border-radius:7px;padding:24px;box-shadow:0 18px 60px rgba(0,0,0,.28);
+}
+.cloud-card h2{font-family:var(--font-display);font-size:25px;margin:0 0 6px;color:var(--ink);}
+.cloud-card p{margin:0 0 14px;color:var(--ink-soft);font-size:13px;}
+.cloud-fields{display:grid;gap:9px;margin:12px 0;}
+.cloud-fields input{
+  width:100%;font-family:var(--font-body);font-size:14px;padding:10px 11px;border:1px solid var(--rule);
+  border-radius:4px;background:var(--paper);color:var(--ink);
+}
+.cloud-fields input:focus{outline:2px solid var(--navy-soft);border-color:var(--navy-soft);}
+.cloud-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;}
+.cloud-message{min-height:19px;margin-top:10px !important;font-size:12px !important;color:var(--ink-soft) !important;}
+.cloud-message.err{color:var(--rust) !important;}
+.cloud-message.ok{color:var(--forest) !important;}
+.cloud-security{font-size:11px !important;color:var(--ink-faint) !important;margin-top:13px !important;}
+.cloud-bar{
+  position:fixed;right:14px;bottom:14px;z-index:9000;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  max-width:min(680px,calc(100vw - 28px));padding:9px 10px;background:var(--paper-raised);
+  border:1px solid var(--rule-strong);border-radius:5px;box-shadow:0 7px 28px rgba(0,0,0,.16);
+}
+.cloud-dot{width:9px;height:9px;border-radius:50%;background:var(--ink-faint);flex:0 0 auto;}
+.cloud-dot.ok{background:var(--forest);}
+.cloud-dot.err{background:var(--rust);}
+.cloud-bar-text{font-size:11.5px;color:var(--ink-soft);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cloud-btn{
+  font-family:var(--font-body);font-size:11.5px;font-weight:600;padding:5px 9px;border:1px solid var(--rule-strong);
+  border-radius:3px;background:transparent;color:var(--ink-soft);cursor:pointer;
+}
+.cloud-btn:hover{background:var(--paper-deep);color:var(--ink);}
+@media (max-width:600px){
+  .cloud-bar{left:10px;right:10px;bottom:10px;}
+  .cloud-bar-text{max-width:150px;}
+}
+
 </style>
 </head>
 <body>
+
+<div class="cloud-gate cloud-hidden" id="cloudGate" role="dialog" aria-modal="true" aria-labelledby="cloudTitle">
+  <div class="cloud-card">
+    <h2 id="cloudTitle">Trainingsplan anmelden</h2>
+    <p>Mit demselben Konto werden Haken, Kilometer, Pace und Herzfrequenz auf allen Geräten synchronisiert.</p>
+    <div class="cloud-fields">
+      <input id="cloudEmail" type="email" autocomplete="email" placeholder="E-Mail-Adresse">
+      <input id="cloudPassword" type="password" autocomplete="current-password" placeholder="Passwort (mindestens 6 Zeichen)">
+    </div>
+    <div class="cloud-actions">
+      <button class="btn" id="cloudLoginBtn" type="button">Anmelden</button>
+      <button class="btn btn-ghost" id="cloudSignupBtn" type="button">Konto erstellen</button>
+      <button class="cloud-btn" id="cloudLocalBtn" type="button">Nur lokal öffnen</button>
+    </div>
+    <p class="cloud-message" id="cloudAuthMessage"></p>
+    <p class="cloud-security">Der Strava-Client-Secret und Strava-Zugriffstoken bleiben aus Sicherheitsgründen ausschließlich auf dem jeweiligen Gerät. Der Trainingsfortschritt wird in Supabase gespeichert.</p>
+  </div>
+</div>
+
+<div class="cloud-bar cloud-hidden" id="cloudBar">
+  <span class="cloud-dot" id="cloudDot"></span>
+  <span class="cloud-bar-text" id="cloudBarText">Cloud wird geprüft …</span>
+  <button class="cloud-btn" id="cloudSyncBtn" type="button">Jetzt synchronisieren</button>
+  <button class="cloud-btn" id="cloudOpenBtn" type="button">Anmelden</button>
+  <button class="cloud-btn cloud-hidden" id="cloudLogoutBtn" type="button">Abmelden</button>
+</div>
+
 <div class="app">
 
   <nav class="rail" id="rail">
@@ -330,7 +401,7 @@ tr.day-row:hover{background:var(--paper-deep);}
 
       <details class="import-panel" id="transferPanel">
         <summary>Fortschritt auf ein anderes Gerät übertragen</summary>
-        <p class="import-hint">Der Fortschritt liegt im Speicher dieses Browsers – Desktop und Handy sind getrennt. Alles aus Strava entsteht auf jedem Gerät neu, sobald du dort synchronisierst. Nur von Hand gesetzte Haken und selbst eingetippte Werte müssen hierüber wandern.</p>
+        <p class="import-hint">Dein Fortschritt wird nach der Supabase-Anmeldung automatisch zwischen Geräten synchronisiert. Dieser Bereich bleibt als manuelle Sicherung und Notfall-Backup erhalten. Strava-Zugangsdaten bleiben aus Sicherheitsgründen pro Gerät lokal.</p>
         <div class="import-row">
           <button class="btn" id="exportBtn">Fortschritt ausgeben</button>
           <button class="btn btn-ghost" id="fileBtn">Als Datei sichern</button>
@@ -10254,6 +10325,7 @@ tr.day-row:hover{background:var(--paper-deep);}
 {"week": 47, "datum": "14.06.27–20.06.27", "phase": "Taper final", "km": "43", "challenge": "", "days": [{"wd": "Mo", "date": "2027-06-14", "distanz": "5 km", "zone": "REC · HF <156 · 7:00–7:30 · 251–290 W", "einheit": "Regenerationslauf, Gehpause jederzeit erlaubt", "kraft": "BEINE Aktivierung: Beinpresse 2×5 bei 50–60 % Last, Beinbeuger 2×8, Waden 2×10, Tibialis 2×15 · RIR 5, kein Muskelkater", "rad": "34 Min · sehr locker, RPE 2/10, 85–95 rpm"}, {"wd": "Di", "date": "2027-06-15", "distanz": "8 km", "zone": "EASY · HF 156–172 · 6:10–6:40 · 312–342 W", "einheit": "8 km EASY, danach 6×20 s Strides bei ~4:00/km, je 100–120 s Gehen · nicht sprinten", "kraft": "—", "rad": "53 Min · locker mit 6×20 s hohe Kadenz"}, {"wd": "Mi", "date": "2027-06-16", "distanz": "4 km", "zone": "REC · HF <156 · 7:00–7:30 · 251–290 W", "einheit": "Regenerationslauf, Gehpause jederzeit erlaubt", "kraft": "—", "rad": "27 Min · sehr locker, RPE 2/10, 85–95 rpm"}, {"wd": "Do", "date": "2027-06-17", "distanz": "6 km", "zone": "EASY · HF 156–172 · 6:10–6:40 · 312–342 W", "einheit": "Lockerer Dauerlauf · HF hat Vorrang vor Pace", "kraft": "—", "rad": "40 Min · GA1, RPE 3/10, 85–95 rpm"}, {"wd": "Fr", "date": "2027-06-18", "distanz": "—", "zone": "—", "einheit": "Ruhetag · Verpflegung für 100 km final", "kraft": "—", "rad": "Ruhetag beibehalten (optional 20–30 Min sehr locker)"}, {"wd": "Sa", "date": "2027-06-19", "distanz": "20 km", "zone": "LONG · HF 156–175 · 6:20–6:55 · 300–342 W", "einheit": "LONGRUN · Verpflegung 45–60 g KH/h ab 90 Min · kein Endspurt, bei HF-Drift >5 bpm Tempo senken", "kraft": "—", "rad": "144 Min · GA1, RPE 3–4/10, Verpflegung testen"}, {"wd": "So", "date": "2027-06-20", "distanz": "—", "zone": "—", "einheit": "Ruhetag · kein zweiter Longrun", "kraft": "—", "rad": "Ruhetag beibehalten (optional 20–30 Min sehr locker)"}], "block": "E"},
 {"week": 48, "datum": "21.06.27–27.06.27", "phase": "100 km am Stück (Saisonhöhepunkt)", "km": "112", "challenge": "★", "days": [{"wd": "Mo", "date": "2027-06-21", "distanz": "4 km", "zone": "REC · HF <156 · 7:00–7:30 · 251–290 W", "einheit": "Regenerationslauf, Gehpause jederzeit erlaubt", "kraft": "BEINE Aktivierung: Beinpresse 2×5 bei 50–60 % Last, Beinbeuger 2×8, Waden 2×10, Tibialis 2×15 · RIR 5, kein Muskelkater", "rad": "27 Min · sehr locker, RPE 2/10, 85–95 rpm"}, {"wd": "Di", "date": "2027-06-22", "distanz": "5 km", "zone": "EASY · HF 156–172 · 6:10–6:40 · 312–342 W", "einheit": "5 km EASY, danach 4×20 s Strides bei ~4:00/km, je 100–120 s Gehen · nicht sprinten", "kraft": "—", "rad": "33 Min · locker mit 4×20 s hohe Kadenz"}, {"wd": "Mi", "date": "2027-06-23", "distanz": "3 km", "zone": "REC · HF <156 · 7:00–7:30 · 251–290 W", "einheit": "Regenerationslauf, Gehpause jederzeit erlaubt", "kraft": "—", "rad": "20 Min · sehr locker, RPE 2/10, 85–95 rpm"}, {"wd": "Do", "date": "2027-06-24", "distanz": "—", "zone": "—", "einheit": "Ruhetag", "kraft": "—", "rad": "Ruhetag beibehalten (optional 20–30 Min sehr locker)"}, {"wd": "Fr", "date": "2027-06-25", "distanz": "—", "zone": "—", "einheit": "Ruhetag · Anreise, früh schlafen", "kraft": "—", "rad": "Ruhetag beibehalten (optional 20–30 Min sehr locker)"}, {"wd": "Sa", "date": "2027-06-26", "distanz": "100 km", "zone": "LONG → Effort", "einheit": "CHALLENGE: Run-Walk 9:1 von Beginn an · bis km 70 HF 156–168, km 70–90 Deckel 175, danach nur bei stabiler Technik · 75 g KH/h durchgehend · nur Laufweste, kein Rucksack", "kraft": "—", "rad": "keine gleichwertige Alternative — spezifisch beibehalten"}, {"wd": "So", "date": "2027-06-27", "distanz": "—", "zone": "—", "einheit": "Kompletter Ruhetag. Flüssigkeit, Kohlenhydrate, Protein, Füße und Schlaf priorisieren. Danach mindestens 3 Wochen ohne strukturiertes Training.", "kraft": "—", "rad": "keine gleichwertige Alternative — spezifisch beibehalten"}], "block": "E"}
 ]</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
 "use strict";
@@ -10269,6 +10341,266 @@ const ZONE_COLORS = {
 const BLOCK_NAMES = {A:'Block A', B:'Block B', C:'Block C', D:'Block D', E:'Block E'};
 
 let state = { days:{}, lastSync:null };
+
+/* ---------- Supabase: geräteübergreifende Cloud-Synchronisierung ---------- */
+const SUPABASE_URL = 'https://xofjoavwikypdwoaoyhw.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_dWgMHQpG36v-vqr9feT78w_5FOepJwH';
+const CLOUD_TABLE = 'app_state';
+const CLOUD_LOCAL_ONLY_KEYS = [
+  'stravaClientSecret','stravaAccessToken','stravaRefreshToken','stravaExpiresAt'
+];
+
+let cloudClient = null;
+let cloudUser = null;
+let cloudEnabled = true;
+let cloudSaveTimer = null;
+let cloudWriteChain = Promise.resolve();
+let cloudBusy = false;
+
+function cloudEl(id){ return document.getElementById(id); }
+function cloneJson(value){ return JSON.parse(JSON.stringify(value)); }
+function cloudHasProgress(value){
+  return !!(value && ((value.days && Object.keys(value.days).length) || value.lastSync));
+}
+function cloudLocalOnlySnapshot(){
+  const keep = {};
+  CLOUD_LOCAL_ONLY_KEYS.forEach(k => {
+    if(Object.prototype.hasOwnProperty.call(state, k)) keep[k] = state[k];
+  });
+  return keep;
+}
+function cloudSafeState(){
+  const copy = cloneJson(state || {});
+  CLOUD_LOCAL_ONLY_KEYS.forEach(k => delete copy[k]);
+  copy.days = copy.days || {};
+  return copy;
+}
+function cloudMergeIntoLocal(cloudData, updatedAt){
+  const localOnly = cloudLocalOnlySnapshot();
+  state = Object.assign({days:{}, lastSync:null}, cloudData || {}, localOnly);
+  state.days = state.days || {};
+  if(updatedAt) state._modifiedAt = updatedAt;
+}
+function saveLocalState(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }catch(e){
+    console.error('Lokales Speichern fehlgeschlagen', e);
+  }
+}
+function cloudSetAuthMessage(kind, text){
+  const el = cloudEl('cloudAuthMessage');
+  if(!el) return;
+  el.className = 'cloud-message' + (kind ? ' ' + kind : '');
+  el.textContent = text || '';
+}
+function cloudSetBar(kind, text){
+  const dot = cloudEl('cloudDot');
+  const label = cloudEl('cloudBarText');
+  if(dot) dot.className = 'cloud-dot' + (kind ? ' ' + kind : '');
+  if(label) label.textContent = text || '';
+}
+function cloudShowGate(show){
+  const gate = cloudEl('cloudGate');
+  if(gate) gate.classList.toggle('cloud-hidden', !show);
+}
+function cloudRefreshControls(){
+  const bar = cloudEl('cloudBar');
+  const syncBtn = cloudEl('cloudSyncBtn');
+  const openBtn = cloudEl('cloudOpenBtn');
+  const logoutBtn = cloudEl('cloudLogoutBtn');
+  if(bar) bar.classList.remove('cloud-hidden');
+  if(syncBtn) syncBtn.classList.toggle('cloud-hidden', !cloudUser);
+  if(openBtn) openBtn.classList.toggle('cloud-hidden', !!cloudUser);
+  if(logoutBtn) logoutBtn.classList.toggle('cloud-hidden', !cloudUser);
+  if(cloudUser){
+    cloudSetBar('ok', 'Cloud verbunden · ' + (cloudUser.email || 'angemeldet'));
+  }else if(cloudEnabled){
+    cloudSetBar('', 'Nur lokal gespeichert · nicht angemeldet');
+  }else{
+    cloudSetBar('', 'Lokaler Modus');
+  }
+}
+function cloudRenderCurrentState(){
+  renderMain();
+  buildRail();
+  refreshStats();
+  if(state.stravaClientId) cloudEl('cidInput').value = state.stravaClientId;
+  if(state.stravaClientSecret) cloudEl('csecInput').value = state.stravaClientSecret;
+  refreshSetupHint();
+}
+async function cloudUploadNow(){
+  if(!cloudClient || !cloudUser || !cloudEnabled) return;
+  const snapshot = cloudSafeState();
+  const userId = cloudUser.id;
+  cloudBusy = true;
+  cloudSetBar('', 'Cloud wird gespeichert …');
+  cloudWriteChain = cloudWriteChain.then(async function(){
+    const result = await cloudClient
+      .from(CLOUD_TABLE)
+      .upsert({ user_id:userId, data:snapshot }, { onConflict:'user_id' });
+    if(result.error) throw result.error;
+  }).then(function(){
+    cloudSetBar('ok', 'Cloud aktuell · ' + new Date().toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'}));
+  }).catch(function(err){
+    console.error('Cloud-Speichern fehlgeschlagen', err);
+    cloudSetBar('err', 'Lokal gespeichert · Cloud-Fehler: ' + (err.message || 'unbekannt'));
+  }).finally(function(){ cloudBusy = false; });
+  return cloudWriteChain;
+}
+function cloudScheduleUpload(){
+  if(!cloudClient || !cloudUser || !cloudEnabled) return;
+  clearTimeout(cloudSaveTimer);
+  cloudSetBar('', 'Lokal gespeichert · Cloud wartet …');
+  cloudSaveTimer = setTimeout(cloudUploadNow, 250);
+}
+async function cloudReadAndResolve(forceCloud){
+  if(!cloudClient || !cloudUser) return;
+  cloudSetBar('', 'Cloud-Daten werden geladen …');
+  const result = await cloudClient
+    .from(CLOUD_TABLE)
+    .select('data,updated_at')
+    .eq('user_id', cloudUser.id)
+    .maybeSingle();
+  if(result.error) throw result.error;
+
+  const row = result.data;
+  if(!row){
+    await cloudUploadNow();
+    return;
+  }
+
+  const cloudData = row.data || {};
+  const cloudTime = Date.parse(row.updated_at || 0) || 0;
+  const localTime = Date.parse(state._modifiedAt || 0) || 0;
+  const localNewer = cloudHasProgress(state) && localTime > cloudTime + 1000;
+
+  if(!forceCloud && localNewer){
+    await cloudUploadNow();
+    return;
+  }
+
+  cloudMergeIntoLocal(cloudData, row.updated_at);
+  saveLocalState();
+  cloudSetBar('ok', 'Cloud geladen · ' + new Date().toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'}));
+}
+async function cloudActivateSession(session, rerender){
+  cloudUser = session && session.user ? session.user : null;
+  cloudEnabled = true;
+  cloudShowGate(false);
+  cloudRefreshControls();
+  if(!cloudUser) return;
+  try{
+    await cloudReadAndResolve(false);
+    if(rerender) cloudRenderCurrentState();
+  }catch(err){
+    console.error('Cloud-Laden fehlgeschlagen', err);
+    cloudSetBar('err', 'Cloud-Laden fehlgeschlagen · lokale Daten bleiben erhalten');
+  }
+}
+async function cloudInitialize(){
+  if(!window.supabase || !window.supabase.createClient){
+    cloudEnabled = false;
+    cloudRefreshControls();
+    cloudSetBar('err', 'Supabase konnte nicht geladen werden · nur lokal');
+    return;
+  }
+  cloudClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true }
+  });
+  const result = await cloudClient.auth.getSession();
+  if(result.error){
+    console.error('Session-Prüfung fehlgeschlagen', result.error);
+    cloudShowGate(true);
+    cloudRefreshControls();
+    cloudSetAuthMessage('err', 'Anmeldung konnte nicht geprüft werden: ' + result.error.message);
+    return;
+  }
+  if(result.data && result.data.session){
+    await cloudActivateSession(result.data.session, false);
+  }else{
+    cloudRefreshControls();
+    cloudShowGate(true);
+  }
+}
+async function cloudLogin(){
+  if(!cloudClient) return cloudSetAuthMessage('err', 'Supabase ist nicht verfügbar.');
+  const email = (cloudEl('cloudEmail').value || '').trim();
+  const password = cloudEl('cloudPassword').value || '';
+  if(!email || !password) return cloudSetAuthMessage('err', 'E-Mail und Passwort vollständig eingeben.');
+  cloudSetAuthMessage('', 'Anmeldung läuft …');
+  const result = await cloudClient.auth.signInWithPassword({email, password});
+  if(result.error) return cloudSetAuthMessage('err', result.error.message);
+  cloudSetAuthMessage('ok', 'Angemeldet. Daten werden geladen …');
+  await cloudActivateSession(result.data.session, true);
+}
+async function cloudSignup(){
+  if(!cloudClient) return cloudSetAuthMessage('err', 'Supabase ist nicht verfügbar.');
+  const email = (cloudEl('cloudEmail').value || '').trim();
+  const password = cloudEl('cloudPassword').value || '';
+  if(!email || password.length < 6) return cloudSetAuthMessage('err', 'Gültige E-Mail und ein Passwort mit mindestens 6 Zeichen eingeben.');
+  cloudSetAuthMessage('', 'Konto wird erstellt …');
+  const result = await cloudClient.auth.signUp({
+    email,
+    password,
+    options:{ emailRedirectTo: window.location.origin + window.location.pathname }
+  });
+  if(result.error) return cloudSetAuthMessage('err', result.error.message);
+  if(result.data && result.data.session){
+    cloudSetAuthMessage('ok', 'Konto erstellt. Daten werden geladen …');
+    await cloudActivateSession(result.data.session, true);
+  }else{
+    cloudSetAuthMessage('ok', 'Bestätigungsmail versendet. Link öffnen und danach hier anmelden.');
+  }
+}
+async function cloudLogout(){
+  if(cloudClient) await cloudClient.auth.signOut();
+  cloudUser = null;
+  cloudEnabled = true;
+  cloudRefreshControls();
+  cloudShowGate(true);
+  cloudSetAuthMessage('', 'Abgemeldet. Lokale Daten auf diesem Gerät bleiben erhalten.');
+}
+async function cloudManualSync(){
+  if(!cloudUser) return cloudShowGate(true);
+  try{
+    clearTimeout(cloudSaveTimer);
+    await cloudReadAndResolve(false);
+    cloudRenderCurrentState();
+  }catch(err){
+    console.error('Manueller Cloud-Abgleich fehlgeschlagen', err);
+    cloudSetBar('err', 'Abgleich fehlgeschlagen: ' + (err.message || 'unbekannt'));
+  }
+}
+function cloudSetupUi(){
+  cloudEl('cloudLoginBtn').addEventListener('click', cloudLogin);
+  cloudEl('cloudSignupBtn').addEventListener('click', cloudSignup);
+  cloudEl('cloudLocalBtn').addEventListener('click', function(){
+    cloudEnabled = false;
+    cloudShowGate(false);
+    cloudRefreshControls();
+  });
+  cloudEl('cloudSyncBtn').addEventListener('click', cloudManualSync);
+  cloudEl('cloudOpenBtn').addEventListener('click', function(){
+    cloudEnabled = true;
+    cloudShowGate(true);
+  });
+  cloudEl('cloudLogoutBtn').addEventListener('click', cloudLogout);
+  cloudEl('cloudPassword').addEventListener('keydown', function(e){
+    if(e.key === 'Enter') cloudLogin();
+  });
+  window.addEventListener('online', function(){
+    if(cloudUser && cloudEnabled) cloudManualSync();
+  });
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible' && cloudUser && cloudEnabled && !cloudBusy){
+      cloudReadAndResolve(false).then(cloudRenderCurrentState).catch(function(err){
+        console.error('Cloud-Aktualisierung beim Öffnen fehlgeschlagen', err);
+      });
+    }
+  });
+}
+
 
 function parseKm(str){
   if(!str) return 0;
@@ -10298,17 +10630,16 @@ async function loadState(){
     const raw = localStorage.getItem(STORAGE_KEY);
     if(raw){
       state = Object.assign({days:{}, lastSync:null}, JSON.parse(raw));
+      state.days = state.days || {};
     }
   }catch(e){
     state = { days:{}, lastSync:null };
   }
 }
 async function saveState(){
-  try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }catch(e){
-    console.error('Speichern fehlgeschlagen', e);
-  }
+  state._modifiedAt = new Date().toISOString();
+  saveLocalState();
+  cloudScheduleUpload();
 }
 
 /* ---------- rendering ---------- */
@@ -11264,6 +11595,8 @@ function applyHeartRates(hrList, idsByDate){
 /* ---------- init ---------- */
 async function init(){
   await loadState();
+  cloudSetupUi();
+  await cloudInitialize();
   buildRail();
   renderMain();
   refreshStats();
