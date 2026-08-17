@@ -10927,29 +10927,38 @@ async function fetchStravaActivities(afterIso, beforeIso){
   const token = await getAccessToken();
   const afterSec  = Math.floor(new Date(afterIso  + 'T00:00:00').getTime()/1000);
   const beforeSec = Math.floor(new Date(beforeIso + 'T23:59:59').getTime()/1000);
-  const url = STRAVA_API + '/athlete/activities?after=' + afterSec + '&before=' + beforeSec + '&per_page=100';
 
-  let res;
-  try{
-    res = await withTimeout(fetch(url, { headers: { 'Authorization': 'Bearer ' + token } }), 45000);
-  }catch(e){
-    throw new Error('Abruf nicht moeglich: ' + (e.message || 'Netzwerkfehler'));
+  /* Strava liefert maximal 100 Aktivitaeten pro Seite. Fuer "seit Planstart"
+     werden deshalb alle benoetigten Seiten geladen, damit ein spaeteres Aufraeumen
+     niemals wegen einer abgeschnittenen Ergebnisliste echte Laeufe entfernt. */
+  const raw = [];
+  for(let page=1; page<=20; page++){
+    const url = STRAVA_API + '/athlete/activities?after=' + afterSec + '&before=' + beforeSec
+      + '&per_page=100&page=' + page;
+    let res;
+    try{
+      res = await withTimeout(fetch(url, { headers: { 'Authorization': 'Bearer ' + token } }), 45000);
+    }catch(e){
+      throw new Error('Abruf nicht moeglich: ' + (e.message || 'Netzwerkfehler'));
+    }
+
+    if(res.status === 401){
+      state.stravaAccessToken = null;
+      state.stravaExpiresAt = 0;
+      await saveState();
+      throw new Error('Zugangsschluessel abgelehnt (401). Bitte erneut synchronisieren.');
+    }
+    if(!res.ok){
+      throw new Error('Strava antwortet mit HTTP ' + res.status + '.');
+    }
+
+    const list = await res.json();
+    if(!Array.isArray(list)) throw new Error('Unerwartetes Antwortformat.');
+    raw.push(...list);
+    if(list.length < 100) break;
   }
 
-  if(res.status === 401){
-    state.stravaAccessToken = null;
-    state.stravaExpiresAt = 0;
-    await saveState();
-    throw new Error('Zugangsschluessel abgelehnt (401). Bitte erneut synchronisieren.');
-  }
-  if(!res.ok){
-    throw new Error('Strava antwortet mit HTTP ' + res.status + '.');
-  }
-
-  const list = await res.json();
-  if(!Array.isArray(list)) throw new Error('Unerwartetes Antwortformat.');
-
-  return list.map(a => {
+  return raw.map(a => {
     const km = (a.distance || 0) / 1000;
     const secs = a.moving_time || 0;
     let pace = null;
@@ -11093,7 +11102,7 @@ async function syncStrava(){
     return;
   }
 
-  const result = mergeActivities(activities);
+  const result = mergeActivities(activities, {cleanupFrom: after, cleanupTo: before});
   let detailResult = {loaded:0, failed:0, requested:0};
   try{
     detailResult = await enrichStructuredActivities(result.matches, statusEl);
@@ -11112,13 +11121,16 @@ async function syncStrava(){
     let msg = result.matched + ' Tag(e) übernommen aus ' + result.considered + ' passender Lauf-/Ruck-Aktivität(en), '
       + result.withHr + ' mit Herzfrequenz.';
     if(result.ignored) msg += ' ' + result.ignored + ' andere Strava-Aktivität(en) (z. B. Gym/Rad) ignoriert.';
+    if(result.clearedStale) msg += ' ' + result.clearedStale + ' alte falsche Strava-Zuordnung(en) bereinigt.';
     if(detailResult.loaded) msg += ' ' + detailResult.loaded + ' strukturierte Einheit(en) mit Runden ausgewertet.';
     if(detailResult.failed) msg += ' ' + detailResult.failed + ' Rundendatensatz/-sätze konnten nicht geladen werden.';
     statusEl.textContent = msg;
   }else{
     statusEl.textContent = activities.length
       ? activities.length + ' Aktivität(en) gefunden, aber keine passende Lauf-/Ruck-Aktivität für einen Plantag. Andere Sportarten werden ignoriert.'
-      : 'Keine Aktivitäten im gewählten Zeitraum.';
+        + (result.clearedStale ? ' ' + result.clearedStale + ' alte falsche Strava-Zuordnung(en) bereinigt.' : '')
+      : 'Keine Aktivitäten im gewählten Zeitraum.'
+        + (result.clearedStale ? ' ' + result.clearedStale + ' alte falsche Strava-Zuordnung(en) bereinigt.' : '');
   }
   btn.disabled = false;
 }
@@ -11934,10 +11946,27 @@ function selectPrimaryStravaActivity(acts){
   })[0];
 }
 
+
+/* Entfernt ausschliesslich Werte, die zuvor automatisch aus Strava geschrieben
+   wurden. Manuelle Eintraege bleiben unangetastet. Das ist wichtig, wenn eine alte
+   Programmversion z. B. ein Krafttraining faelschlich als Lauf gespeichert hat. */
+function clearStravaDerivedDay(date){
+  const s = state.days && state.days[date];
+  if(!s || s.source !== 'strava') return false;
+  delete state.days[date];
+  return true;
+}
+
+function isoInRange(iso, fromIso, toIso){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return false;
+  return (!fromIso || iso >= fromIso) && (!toIso || iso <= toIso);
+}
+
 /* Zuordnung ohne Distanzvergleich: die gelaufenen Kilometer duerfen beliebig von der
    Vorgabe abweichen. Exaktes Datum hat Vorrang, die 1-Tag-Toleranz greift nur bei
    Datumsangaben ausserhalb des Plans. */
-function mergeActivities(activities){
+function mergeActivities(activities, options){
+  options = options || {};
   const byDate = {};
   activities.forEach(a => {
     const d = String(a.date || '').slice(0,10);
@@ -11954,6 +11983,22 @@ function mergeActivities(activities){
   let considered = 0;
   let ignored = 0;
   let withHr = 0;
+  let clearedStale = 0;
+
+  /* Alte falsche Strava-Zuordnungen im gerade synchronisierten Zeitraum bereinigen.
+     Beispiel: Eine fruehere Version hatte "Evening Weight Training" am REC-Tag
+     gespeichert. Der neue Filter ignoriert Gym zwar, ohne diese Bereinigung bliebe
+     der alte Cloud-Datensatz aber fuer immer sichtbar. */
+  if(options.cleanupFrom || options.cleanupTo){
+    PLAN.forEach(w => w.days.forEach(day => {
+      const date = day.date;
+      if(!isoInRange(date, options.cleanupFrom, options.cleanupTo)) return;
+      const s = state.days && state.days[date];
+      if(!s || s.source !== 'strava') return;
+      const relevantNow = compatibleActivitiesForDay(day, byDate[date] || []);
+      if(!relevantNow.length && clearStravaDerivedDay(date)) clearedStale++;
+    }));
+  }
 
   Object.keys(byDate).forEach(strDate => {
     const acts = byDate[strDate];
@@ -12003,7 +12048,7 @@ function mergeActivities(activities){
     matched++;
   });
 
-  return { matched:matched, idsByDate:idsByDate, matches:matches, considered:considered, ignored:ignored, withHr:withHr };
+  return { matched:matched, idsByDate:idsByDate, matches:matches, considered:considered, ignored:ignored, withHr:withHr, clearedStale:clearedStale };
 }
 
 function applyHeartRates(hrList, idsByDate){
