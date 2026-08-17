@@ -11107,17 +11107,17 @@ async function syncStrava(){
   buildRail();
   refreshStats();
 
-  const withHr = activities.filter(a => a.avg_heart_rate).length;
   statusEl.className = result.matched ? 'sync-status ok' : 'sync-status';
   if(result.matched){
-    let msg = result.matched + ' Tag(e) übernommen aus ' + activities.length + ' Aktivität(en), '
-      + withHr + ' mit Herzfrequenz.';
+    let msg = result.matched + ' Tag(e) übernommen aus ' + result.considered + ' passender Lauf-/Ruck-Aktivität(en), '
+      + result.withHr + ' mit Herzfrequenz.';
+    if(result.ignored) msg += ' ' + result.ignored + ' andere Strava-Aktivität(en) (z. B. Gym/Rad) ignoriert.';
     if(detailResult.loaded) msg += ' ' + detailResult.loaded + ' strukturierte Einheit(en) mit Runden ausgewertet.';
     if(detailResult.failed) msg += ' ' + detailResult.failed + ' Rundendatensatz/-sätze konnten nicht geladen werden.';
     statusEl.textContent = msg;
   }else{
     statusEl.textContent = activities.length
-      ? activities.length + ' Aktivität(en) gefunden, aber kein passender Plantag.'
+      ? activities.length + ' Aktivität(en) gefunden, aber keine passende Lauf-/Ruck-Aktivität für einen Plantag. Andere Sportarten werden ignoriert.'
       : 'Keine Aktivitäten im gewählten Zeitraum.';
   }
   btn.disabled = false;
@@ -11896,6 +11896,44 @@ function shiftIso(iso, n){
   return dt.toISOString().slice(0,10);
 }
 
+/* Nur sportlich passende Strava-Aktivitaeten duerfen einen Plantag fuellen.
+   Krafttraining/Workout/Yoga/Rad usw. werden bewusst ignoriert. */
+function stravaActivityKind(a){
+  const t = String((a && a.type) || '').trim().toLowerCase();
+  if(/^(run|trailrun|virtualrun)$/.test(t) || /run$/.test(t)) return 'run';
+  if(/^(walk)$/.test(t)) return 'walk';
+  if(/^(hike)$/.test(t)) return 'hike';
+  return 'other';
+}
+
+function compatibleActivitiesForDay(day, acts){
+  if(!day || !Array.isArray(acts)) return [];
+  const spec = workoutSpec(day);
+  const text = ((day.einheit || '') + ' ' + (day.distanz || '')).toLowerCase();
+
+  /* Ruhetage duerfen durch irgendeine Strava-Aktivitaet nicht automatisch als erledigt gelten. */
+  if(/ruhetag/.test(text) || !String(day.distanz || '').match(/\d/)) return [];
+
+  if(spec.type === 'RUCK'){
+    return acts.filter(a => ['walk','hike','run'].includes(stravaActivityKind(a)));
+  }
+  if(spec.type === 'VERTICAL'){
+    return acts.filter(a => ['run','walk','hike'].includes(stravaActivityKind(a)));
+  }
+
+  /* Alle normalen Lauf-, Intervall-, Test- und Challenge-Tage: nur echte Laufaktivitaeten. */
+  return acts.filter(a => stravaActivityKind(a) === 'run');
+}
+
+function selectPrimaryStravaActivity(acts){
+  if(!acts || !acts.length) return null;
+  return acts.slice().sort((a,b) => {
+    const db = Number(b.distance_km) || 0, da = Number(a.distance_km) || 0;
+    if(db !== da) return db - da;
+    return (Number(b.moving_time_s) || 0) - (Number(a.moving_time_s) || 0);
+  })[0];
+}
+
 /* Zuordnung ohne Distanzvergleich: die gelaufenen Kilometer duerfen beliebig von der
    Vorgabe abweichen. Exaktes Datum hat Vorrang, die 1-Tag-Toleranz greift nur bei
    Datumsangaben ausserhalb des Plans. */
@@ -11913,6 +11951,9 @@ function mergeActivities(activities){
   const idsByDate = {};
   const matches = [];
   let matched = 0;
+  let considered = 0;
+  let ignored = 0;
+  let withHr = 0;
 
   Object.keys(byDate).forEach(strDate => {
     const acts = byDate[strDate];
@@ -11921,30 +11962,48 @@ function mergeActivities(activities){
     if(planDates.has(strDate)) target = strDate;
     else if(free(shiftIso(strDate,-1))) target = shiftIso(strDate,-1);
     else if(free(shiftIso(strDate, 1))) target = shiftIso(strDate, 1);
-    if(!target) return;
+    if(!target){ ignored += acts.length; return; }
 
-    const primary = acts.find(a => /run|lauf|trail|walk|hike/i.test(a.type || '')) || acts[0];
+    const day = findPlanDay(target);
+    const relevantActs = compatibleActivitiesForDay(day, acts);
+    ignored += Math.max(0, acts.length - relevantActs.length);
+    if(!relevantActs.length) return;
+
+    considered += relevantActs.length;
+    withHr += relevantActs.filter(a => a.avg_heart_rate).length;
+    const primary = selectPrimaryStravaActivity(relevantActs);
+    if(!primary) return;
+
     const s = state.days[target] = state.days[target] || {};
+    const newActivityId = primary.activity_id ? String(primary.activity_id) : null;
+    if(s.activityId && newActivityId && String(s.activityId) !== newActivityId){
+      delete s.laps;
+      delete s.splitsMetric;
+      delete s.detailFetchedAt;
+      delete s.detailError;
+    }
+
     s.done = true;
     s.source = 'strava';
-    s.pace = primary.avg_pace_min_km || s.pace || '';
-    if(primary.avg_heart_rate) s.hf = String(Math.round(primary.avg_heart_rate));
-    s.distanceKm = acts.reduce((sum,a) => sum + (Number(a.distance_km) || 0), 0);
-    s.km = s.distanceKm ? (Math.round(s.distanceKm*100)/100).toString().replace('.', ',') : (s.km || '');
+    s.pace = primary.avg_pace_min_km || '';
+    s.hf = primary.avg_heart_rate ? String(Math.round(primary.avg_heart_rate)) : '';
+    s.distanceKm = relevantActs.reduce((sum,a) => sum + (Number(a.distance_km) || 0), 0);
+    s.km = s.distanceKm ? (Math.round(s.distanceKm*100)/100).toString().replace('.', ',') : '';
     s.activityName = primary.name || primary.type || '';
-    s.activities = acts;
-    s.elevationGainM = acts.reduce((sum,a)=>sum+(Number(a.elevation_gain_m)||0),0);
+    s.activityType = primary.type || '';
+    s.activities = relevantActs;
+    s.elevationGainM = relevantActs.reduce((sum,a)=>sum+(Number(a.elevation_gain_m)||0),0);
     s.avgWatts = primary.avg_watts || null;
-    s.deviceName = primary.device_name || s.deviceName || '';
-    if(primary.activity_id){
-      s.activityId = String(primary.activity_id);
-      idsByDate[target] = String(primary.activity_id);
-      matches.push({date:target,activityId:String(primary.activity_id),activity:primary});
+    s.deviceName = primary.device_name || '';
+    if(newActivityId){
+      s.activityId = newActivityId;
+      idsByDate[target] = newActivityId;
+      matches.push({date:target,activityId:newActivityId,activity:primary});
     }
     matched++;
   });
 
-  return { matched:matched, idsByDate:idsByDate, matches:matches };
+  return { matched:matched, idsByDate:idsByDate, matches:matches, considered:considered, ignored:ignored, withHr:withHr };
 }
 
 function applyHeartRates(hrList, idsByDate){
